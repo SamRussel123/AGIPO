@@ -8,6 +8,7 @@ import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import { TabNavigator } from './TabNavigator'; 
 import LoginScreen from '../screens/LoginScreen';
 import SignUpScreen from '../screens/SignUpScreen';
+import PokemonDetailScreen from '../screens/PokemonDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -56,7 +57,10 @@ export const RootNavigator = () => {
     <NavigationContainer theme={PokedexTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user ? (
-          <Stack.Screen name="MainApp" component={TabNavigator} />
+          <Stack.Group>
+            <Stack.Screen name="MainApp" component={TabNavigator} />
+            <Stack.Screen name="PokemonDetailScreen" component={PokemonDetailScreen} />
+          </Stack.Group>
         ) : (
           <Stack.Group>
             <Stack.Screen name="Login" component={LoginScreen} />
