@@ -1,17 +1,9 @@
-// src/api/pokeApi.ts
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const POKEAPI_BASE_URL = 'https://pokeapi.co/api/v2';
-const POKEMON_LIST_CACHE_KEY = 'pokemon_list_cache';
+const POKEMON_LIST_CACHE_KEY = 'pokemon_list_cache_v2'; // Changed key to force refresh
 const POKEMON_DETAIL_CACHE_PREFIX = 'pokemon_detail_';
-const INITIAL_POKEMON_LIMIT = 151; // Gen 1, as per requirement [cite: 67]
-
-// Define a type for the basic list item
-export type PokemonListItem = {
-  name: string;
-  url: string;
-};
+const INITIAL_POKEMON_LIMIT = 21;
 
 // Define a type for the detailed Pokémon data
 export type PokemonDetail = {
@@ -19,46 +11,61 @@ export type PokemonDetail = {
   name: string;
   types: string[];
   abilities: string[];
-  stats: any[]; // You can type this more strictly if needed
+  stats: any[];
   spriteUrl: string;
-  speciesData: any; // Contains evolution chain link and flavor text
+  speciesData: any;
   weight: number;
   height: number;
 };
 
 /**
- * Fetches a list of Pokémon with basic information (name and URL).
- * Implements caching using AsyncStorage for offline support. [cite: 30]
+ * 1. FETCH LIST (UPGRADED)
+ * Fetches the first 151 Pokémon AND their details (Types, Sprites) in parallel.
+ * This effectively replaces your MOCK_DATA with real API data.
+ * [cite_start]Implements caching so this heavy load only happens once. [cite: 30]
  */
-export async function fetchPokemonList(): Promise<PokemonListItem[]> {
-  // 1. Check cache first
+export async function fetchPokemonList(): Promise<PokemonDetail[]> {
+  // A. Check Cache First
   try {
     const cachedList = await AsyncStorage.getItem(POKEMON_LIST_CACHE_KEY);
     if (cachedList) {
-      console.log('Returning list from cache.');
+      console.log('Returning full Pokedex from cache.');
       return JSON.parse(cachedList);
     }
   } catch (e) {
-    console.warn('Could not read cache:', e);
+    console.warn('Could not read list cache:', e);
   }
 
-  // 2. If not cached, fetch from API
+  // B. If not cached, Fetch from API
   try {
-    const response = await fetch(
-      `${POKEAPI_BASE_URL}/pokemon?limit=${INITIAL_POKEMON_LIMIT}&offset=0`,
+    console.log('Fetching fresh Pokedex list...');
+    // 1. Get the list of names/URLs
+    const listResponse = await fetch(
+      `${POKEAPI_BASE_URL}/pokemon?limit=${INITIAL_POKEMON_LIMIT}&offset=0`
     );
-    if (!response.ok) throw new Error('Network response was not ok');
-    
-    const data = await response.json();
-    const results: PokemonListItem[] = data.results;
+    if (!listResponse.ok) throw new Error('Network response was not ok');
+    const listData = await listResponse.json();
 
-    // 3. Cache the new data
+    // 2. "Batch" fetch details for all of them
+    // We map over the results and trigger a fetch for each one immediately.
+    // usage of Promise.all ensures we wait for all 151 to finish before continuing.
+    const promises = listData.results.map(async (item: { name: string; url: string }) => {
+      return await fetchPokemonDetail(item.name);
+    });
+
+    const results = await Promise.all(promises);
+
+    // Filter out any nulls if a request failed
+    const validResults = results.filter((p): p is PokemonDetail => p !== null);
+
+    // C. Cache the big list
     await AsyncStorage.setItem(
       POKEMON_LIST_CACHE_KEY,
-      JSON.stringify(results),
+      JSON.stringify(validResults)
     );
-    console.log('Fetched and cached new list.');
-    return results;
+    console.log('Fetched and cached new full list.');
+    return validResults;
+
   } catch (error) {
     console.error('Error fetching Pokémon list:', error);
     return [];
@@ -66,62 +73,59 @@ export async function fetchPokemonList(): Promise<PokemonListItem[]> {
 }
 
 /**
+ * 2. FETCH DETAIL
  * Fetches detailed information for a specific Pokémon by ID or name.
- * Implements caching for individual Pokémon details.
  */
 export async function fetchPokemonDetail(
-  idOrName: string | number,
+  idOrName: string | number
 ): Promise<PokemonDetail | null> {
   const cacheKey = `${POKEMON_DETAIL_CACHE_PREFIX}${idOrName}`;
 
-  // 1. Check cache for this specific Pokémon
+  // Check cache
   try {
     const cachedDetail = await AsyncStorage.getItem(cacheKey);
     if (cachedDetail) {
-      console.log(`Returning detail for ${idOrName} from cache.`);
       return JSON.parse(cachedDetail);
     }
   } catch (e) {
-    console.warn('Could not read detail cache:', e);
+    // Ignore cache errors
   }
 
-  // 2. If not cached, fetch from API
   try {
-    console.log(`Fetching detail for ${idOrName} from API...`);
-    const detailResponse = await fetch(
-      `${POKEAPI_BASE_URL}/pokemon/${idOrName}`,
-    );
+    // Fetch Basic Data
+    const detailResponse = await fetch(`${POKEAPI_BASE_URL}/pokemon/${idOrName}`);
     if (!detailResponse.ok) throw new Error('Failed to fetch Pokémon details');
     const detailData = await detailResponse.json();
 
-    // Fetch species data for flavor text and evolution chain
-    const speciesResponse = await fetch(detailData.species.url);
-    if (!speciesResponse.ok) throw new Error('Failed to fetch species data');
-    const speciesData = await speciesResponse.json();
+    // Fetch Species Data (for flavor text)
+    // We wrap this in a try/catch because sometimes species data is missing or fails,
+    // and we don't want to break the whole app just for flavor text.
+    let speciesData = {};
+    try {
+        const speciesResponse = await fetch(detailData.species.url);
+        speciesData = await speciesResponse.json();
+    } catch (err) {
+        console.warn('Failed to fetch species data', err);
+    }
 
-    // Combine essential data points
     const pokemonDetail: PokemonDetail = {
       id: detailData.id,
       name: detailData.name,
       types: detailData.types.map((t: any) => t.type.name),
       abilities: detailData.abilities.map((a: any) => a.ability.name),
       stats: detailData.stats,
-      spriteUrl: detailData.sprites.front_default, // Default sprite [cite: 27]
-      // You can also grab the animated GIF:
-      // spriteUrl: detailData.sprites.versions['generation-v']['black-white'].animated.front_default,
-      speciesData: speciesData, // Contains evolution_chain.url and flavor_text_entries
+      spriteUrl: detailData.sprites.front_default, 
+      speciesData: speciesData,
       weight: detailData.weight,
       height: detailData.height,
     };
 
-    // 3. Cache the new detail data
+    // Cache specific detail
     await AsyncStorage.setItem(cacheKey, JSON.stringify(pokemonDetail));
     return pokemonDetail;
+
   } catch (error) {
     console.error(`Error fetching Pokémon detail for ${idOrName}:`, error);
     return null;
   }
 }
-
-// You can add more functions here, e.g., for fetching by type
-// export async function fetchPokemonByType(type: string) { ... }
