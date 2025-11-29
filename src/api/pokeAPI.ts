@@ -22,7 +22,7 @@ export type PokemonDetail = {
  * 1. FETCH LIST (UPGRADED)
  * Fetches the first 151 Pokémon AND their details (Types, Sprites) in parallel.
  * This effectively replaces your MOCK_DATA with real API data.
- * [cite_start]Implements caching so this heavy load only happens once. [cite: 30]
+ * Implements caching so this heavy load only happens once.
  */
 export async function fetchPokemonList(): Promise<PokemonDetail[]> {
   // A. Check Cache First
@@ -47,8 +47,6 @@ export async function fetchPokemonList(): Promise<PokemonDetail[]> {
     const listData = await listResponse.json();
 
     // 2. "Batch" fetch details for all of them
-    // We map over the results and trigger a fetch for each one immediately.
-    // usage of Promise.all ensures we wait for all 151 to finish before continuing.
     const promises = listData.results.map(async (item: { name: string; url: string }) => {
       return await fetchPokemonDetail(item.name);
     });
@@ -98,8 +96,6 @@ export async function fetchPokemonDetail(
     const detailData = await detailResponse.json();
 
     // Fetch Species Data (for flavor text)
-    // We wrap this in a try/catch because sometimes species data is missing or fails,
-    // and we don't want to break the whole app just for flavor text.
     let speciesData = {};
     try {
         const speciesResponse = await fetch(detailData.species.url);
@@ -126,6 +122,33 @@ export async function fetchPokemonDetail(
 
   } catch (error) {
     console.error(`Error fetching Pokémon detail for ${idOrName}:`, error);
+    return null;
+  }
+}
+
+/**
+ * 3. GET POKEMON BASIC (NEW - Lightweight for ARScreen)
+ * Simple lightweight fetch for AR capture overlay - just sprite + basic info
+ * No caching needed for this quick lookup
+ */
+export async function getPokemonBasic(idOrName: number | string) {
+  try {
+    const resp = await fetch(`https://pokeapi.co/api/v2/pokemon/${idOrName}`);
+    if (!resp.ok) throw new Error("Not found");
+    const json = await resp.json();
+    // prefer official-artwork or front_default
+    const sprite =
+      json.sprites?.other?.["official-artwork"]?.front_default ||
+      json.sprites?.front_default ||
+      null;
+    return {
+      id: json.id,
+      name: json.name,
+      sprite,
+      types: json.types?.map((t: any) => t.type?.name) || [],
+    };
+  } catch (err) {
+    console.warn("poke api error", err);
     return null;
   }
 }
