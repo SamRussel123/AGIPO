@@ -23,7 +23,7 @@ type CapturedMeta = {
 
 const ARScreen = ({ navigation }: any) => {
   const devices = useCameraDevices();
-  const device = devices.back;
+  const device = devices.find(d => d.position === 'back');
   const camera = useRef<Camera>(null);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
 
@@ -34,7 +34,7 @@ const ARScreen = ({ navigation }: any) => {
   useEffect(() => {
     (async () => {
       const status = await Camera.requestCameraPermission();
-      setHasPermission(status === "authorized");
+      setHasPermission(status === "granted");
     })();
   }, []);
 
@@ -58,7 +58,7 @@ const ARScreen = ({ navigation }: any) => {
       });
 
       // Handle different path/uri formats on Android and iOS
-      const photoUri = Platform.OS === "android" ? "file://" + photo.path : photo.path || photo.uri;
+      const photoUri = Platform.OS === "android" ? "file://" + photo.path : photo.path;
 
       // Save metadata + photoUri to AsyncStorage as discovered capture
       const entry: CapturedMeta = {
